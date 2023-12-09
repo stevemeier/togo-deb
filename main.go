@@ -6,36 +6,29 @@ import "debug/elf"
 import "fmt"
 import "log"
 import "os"
+import "path/filepath"
 import "strings"
-//import "github.com/nesv/rpm/spec"
 import "github.com/xor-gate/debpkg"
 
 func main() {
+	// Check if spec file exists
 	if !file_exists("spec/header") {
 		log.Fatal("spec/header not found")
 	}
 
-	// Read the spec file
-//	specfile, readerr := os.Open("spec/header")
-//	if readerr != nil {
-//		log.Fatal(readerr)
-//	}
-//	defer specfile.Close()
-
-//	specdata, specerr := spec.ParseReader(specfile)
+	// Parse the spec file
 	specdata, specerr := parseSpecFile("spec/header")
 	if specerr != nil {
 		log.Fatal(specerr)
 	}
 
+	// Open togo's SQLite database for package content
 	files := get_filelist("./helper.db")
 
 	// New deb package
 	deb := debpkg.New()
 
 	// Apply settings from spec file to new deb package
-//	deb.SetName(specdata.Name())
-//	deb.SetVersion(specdata.Version())
 	deb.SetName(specdata.Name)
 	deb.SetVersion(specdata.Version)
 	deb.SetMaintainer(specdata.Packager)
@@ -45,9 +38,10 @@ func main() {
 	// Iterate over files
 	arch := make(map[string]int)
 	for _, file := range files {
-		fmt.Printf("Adding %s\n", "root/"+file)
+		fmt.Printf("Adding %s\n", filepath.Clean("root/"+file))
 		arch[binary_deb_arch("root/"+file)]++
-		deb.AddFile("root/"+file, strings.TrimLeft(file, "/"))
+		adderr := deb.AddFile(filepath.Clean("root/"+file), strings.TrimLeft(file, "/"))
+		if adderr != nil { log.Fatal(adderr) }
 	}
 
 	delete(arch, "unknown")
@@ -61,16 +55,18 @@ func main() {
 
 	// This is a loop, but there is only one element, so it should be safe
 	var debarch string
-	for k, _ := range arch {
+	for k := range arch {
 		debarch = k
 	}
 	deb.SetArchitecture(debarch)
 
+	// Construct the filename
 	debfile := fmt.Sprintf("%s_%s_%s.deb", specdata.Name, specdata.Version, debarch)
 	if file_exists(debfile) {
 		log.Fatalf("%s already exists, not overwriting it\n", debfile)
 	}
 
+	// Write the new .deb file
 	writeerr := deb.Write(debfile)
 	if writeerr != nil { log.Fatal(writeerr) }
 
@@ -120,7 +116,8 @@ func get_filelist (dbfile string) ([]string) {
 	
 	for row.Next() {
 		var path string
-		row.Scan(&path)
+		scanerr := row.Scan(&path)
+		if scanerr != nil { log.Fatal(scanerr) }
 		filelist = append(filelist, path)
 	}
 
